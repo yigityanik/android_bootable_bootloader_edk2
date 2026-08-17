@@ -185,10 +185,24 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
 
   Status = GetKeyPress (&KeyPressed);
   if (Status == EFI_SUCCESS) {
-    if (KeyPressed == SCAN_DOWN)
+    if (KeyPressed == SCAN_DOWN ||
+        KeyPressed == SCAN_DELETE)
       BootIntoFastboot = TRUE;
-    if (KeyPressed == SCAN_UP)
-      BootIntoRecovery = TRUE;
+
+    if (KeyPressed == SCAN_UP) {
+      BOOLEAN ChargerBoot = FALSE;
+
+      TargetPauseForBatteryCharge (&ChargerBoot);
+
+      if (ChargerBoot) {
+        DEBUG ((EFI_D_ERROR,
+                "VOL+ + USB cold boot detected - entering EDL\n"));
+        RebootDevice (EMERGENCY_DLOAD);
+      } else {
+        BootIntoRecovery = TRUE;
+      }
+    }
+
     if (KeyPressed == SCAN_ESC)
       RebootDevice (EMERGENCY_DLOAD);
   } else if (Status == EFI_DEVICE_ERROR) {
