@@ -31,9 +31,12 @@
 #include <Library/DebugLib.h>
 #include <Library/DeviceInfo.h>
 #include <Library/DrawUI.h>
+#include <Library/FastbootWarningIcon.h>
+#include <Library/FastbootKeyIcons.h>
 #include <Library/FastbootMenu.h>
 #include <Library/MemoryAllocationLib.h>
 #include <Library/MenuKeysDetection.h>
+#include <Library/PartitionTableUpdate.h>
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/UpdateDeviceTree.h>
 #include <Library/BootLinux.h>
@@ -43,13 +46,38 @@
 STATIC OPTION_MENU_INFO gMenuInfo;
 
 STATIC MENU_MSG_INFO mFastbootOptionTitle[] = {
-    {{"START"},
+    {{"Resume"},
      BIG_FACTOR,
      BGR_GREEN,
      BGR_BLACK,
      OPTION_ITEM,
      0,
      RESTART},
+
+    {{"Power Off"},
+     BIG_FACTOR,
+     BGR_RED,
+     BGR_BLACK,
+     OPTION_ITEM,
+     0,
+     POWEROFF},
+
+    {{"Emergency Download"},
+     BIG_FACTOR,
+     BGR_YELLOW,
+     BGR_BLACK,
+     OPTION_ITEM,
+     0,
+     EDL},
+
+    {{"Recovery Mode"},
+     BIG_FACTOR,
+     BGR_PINK,
+     BGR_BLACK,
+     OPTION_ITEM,
+     0,
+     RECOVER},
+
     {{"Restart bootloader"},
      BIG_FACTOR,
      BGR_RED,
@@ -57,102 +85,8 @@ STATIC MENU_MSG_INFO mFastbootOptionTitle[] = {
      OPTION_ITEM,
      0,
      FASTBOOT},
-    {{"Recovery mode"},
-     BIG_FACTOR,
-     BGR_RED,
-     BGR_BLACK,
-     OPTION_ITEM,
-     0,
-     RECOVER},
-    {{"Power off"},
-     BIG_FACTOR,
-     BGR_WHITE,
-     BGR_BLACK,
-     OPTION_ITEM,
-     0,
-     POWEROFF},
-    {{"Boot to FFBM"},
-     BIG_FACTOR,
-     BGR_YELLOW,
-     BGR_BLACK,
-     OPTION_ITEM,
-     0,
-     FFBM},
-    {{"Boot to QMMI"},
-     BIG_FACTOR,
-     BGR_YELLOW,
-     BGR_BLACK,
-     OPTION_ITEM,
-     0,
-     QMMI},
 };
 
-STATIC MENU_MSG_INFO mFastbootCommonMsgInfo[] = {
-    {{"\nPress volume key to select, "
-      "and press power key to select\n\n"},
-     COMMON_FACTOR,
-     BGR_WHITE,
-     BGR_BLACK,
-     COMMON,
-     0,
-     NOACTION},
-    {{"FastBoot Mode"},
-     COMMON_FACTOR,
-     BGR_RED,
-     BGR_BLACK,
-     COMMON,
-     0,
-     NOACTION},
-    {{"PRODUCT_NAME - "},
-     COMMON_FACTOR,
-     BGR_WHITE,
-     BGR_BLACK,
-     COMMON,
-     0,
-     NOACTION},
-    {{"VARIANT - "},
-     COMMON_FACTOR,
-     BGR_WHITE,
-     BGR_BLACK,
-     COMMON,
-     0,
-     NOACTION},
-    {{"BOOTLOADER VERSION - "},
-     COMMON_FACTOR,
-     BGR_WHITE,
-     BGR_BLACK,
-     COMMON,
-     0,
-     NOACTION},
-    {{"BASEBAND VERSION - "},
-     COMMON_FACTOR,
-     BGR_WHITE,
-     BGR_BLACK,
-     COMMON,
-     0,
-     NOACTION},
-    {{"SERIAL NUMBER - "},
-     COMMON_FACTOR,
-     BGR_WHITE,
-     BGR_BLACK,
-     COMMON,
-     0,
-     NOACTION},
-    {{"SECURE BOOT - "},
-     COMMON_FACTOR,
-     BGR_WHITE,
-     BGR_BLACK,
-     COMMON,
-     0,
-     NOACTION},
-    {{"DEVICE STATE - "},
-     COMMON_FACTOR,
-     BGR_RED,
-     BGR_BLACK,
-     COMMON,
-     0,
-     NOACTION},
-};
 
 /**
   Update the fastboot option item
@@ -161,47 +95,88 @@ STATIC MENU_MSG_INFO mFastbootCommonMsgInfo[] = {
   @retval EFI_SUCCESS	 The entry point is executed successfully.
   @retval other		 Some error occurs when executing this entry point.
  **/
+
+STATIC EFI_STATUS
+DrawFastbootTextAt (CONST CHAR8 *Text,
+                    UINT32 X,
+                    UINT32 Y,
+                    UINT32 Scale,
+                    UINT32 FgColor,
+                    UINT32 *TextHeight)
+{
+  return DrawFastbootBitmapText (
+      Text,
+      X,
+      Y,
+      Scale == BIG_FACTOR,
+      FgColor,
+      TextHeight);
+}
+
+
 EFI_STATUS
 UpdateFastbootOptionItem (UINT32 OptionItem, UINT32 *pLocation)
 {
-  EFI_STATUS Status = EFI_SUCCESS;
-  UINT32 Location = 0;
-  UINT32 Height = 0;
-  MENU_MSG_INFO *FastbootLineInfo = NULL;
+  EFI_STATUS Status;
+  UINT32 Width = GetScreenWidth ();
+  UINT32 Height = GetScreenHeight ();
+  UINT32 LabelX;
+  UINT32 ValueX;
+  UINT32 ArrowX;
+  UINT32 Y;
+  UINT32 Color;
 
-  FastbootLineInfo = AllocateZeroPool (sizeof (MENU_MSG_INFO));
-  if (FastbootLineInfo == NULL) {
-    DEBUG ((EFI_D_ERROR, "Failed to allocate zero pool.\n"));
-    return EFI_OUT_OF_RESOURCES;
-  }
+  if (OptionItem >= ARRAY_SIZE (mFastbootOptionTitle))
+    return EFI_INVALID_PARAMETER;
 
-  SetMenuMsgInfo (FastbootLineInfo, "__________", COMMON_FACTOR,
-                  mFastbootOptionTitle[OptionItem].FgColor,
-                  mFastbootOptionTitle[OptionItem].BgColor, LINEATION, Location,
-                  NOACTION);
-  Status = DrawMenu (FastbootLineInfo, &Height);
-  if (Status != EFI_SUCCESS)
-    goto Exit;
-  Location += Height;
+  LabelX = Width * 6 / 100;
+  ValueX = Width * 22 / 100;
+  ArrowX = Width * 90 / 100;
+  Y = Height * 92 / 100;
+  Color = mFastbootOptionTitle[OptionItem].FgColor;
 
-  mFastbootOptionTitle[OptionItem].Location = Location;
-  Status = DrawMenu (&mFastbootOptionTitle[OptionItem], &Height);
-  if (Status != EFI_SUCCESS)
-    goto Exit;
-  Location += Height;
+  /*
+   * Clear only the selected item area.
+   */
+  FillRect (
+      0,
+      Height * 91 / 100,
+      Width,
+      Height * 4 / 100,
+      BGR_BLACK);
 
-  FastbootLineInfo->Location = Location;
-  Status = DrawMenu (FastbootLineInfo, &Height);
-  if (Status != EFI_SUCCESS)
-    goto Exit;
-  Location += Height;
+  Status = DrawFastbootTextAt (
+      "Selected:",
+      LabelX,
+      Y,
+      COMMON_FACTOR,
+      BGR_SILVER,
+      NULL);
 
-Exit:
-  FreePool (FastbootLineInfo);
-  FastbootLineInfo = NULL;
+  if (EFI_ERROR (Status))
+    return Status;
+
+  Status = DrawFastbootTextAt (
+      mFastbootOptionTitle[OptionItem].Msg,
+      ValueX,
+      Y,
+      COMMON_FACTOR,
+      Color,
+      NULL);
+
+  if (EFI_ERROR (Status))
+    return Status;
+
+  Status = DrawFastbootTextAt (
+      ">",
+      ArrowX,
+      Y,
+      COMMON_FACTOR,
+      Color,
+      NULL);
 
   if (pLocation != NULL)
-    *pLocation = Location;
+    *pLocation = Y;
 
   return Status;
 }
@@ -215,105 +190,421 @@ Exit:
 STATIC EFI_STATUS
 FastbootMenuShowScreen (OPTION_MENU_INFO *OptionMenuInfo)
 {
-  EFI_STATUS Status = EFI_SUCCESS;
-  UINT32 Location = 0;
-  UINT32 OptionItem = 0;
-  UINT32 Height = 0;
-  UINT32 i = 0;
-  CHAR8 StrTemp[MAX_RSP_SIZE] = "";
-  CHAR8 StrTemp1[MAX_RSP_SIZE] = "";
+  EFI_STATUS Status;
+  UINT32 Width = GetScreenWidth ();
+  UINT32 Height = GetScreenHeight ();
+  UINT32 LabelX;
+  UINT32 ColonX;
+  UINT32 ValueX;
+  UINT32 Y;
+  UINT32 Step;
+  UINT32 InstructionY;
+  UINT32 InstructionHeight = 0;
+  UINT32 DividerY;
+
+  UINT32 VolumeUpY;
+  UINT32 VolumeDownY;
+  UINT32 PowerY;
+  UINT32 LeftArrowX;
+  UINT32 RightArrowX;
+
+  UINT32 OptionItem;
+  UINT32 i;
+
+  CHAR8 Product[MAX_RSP_SIZE] = "";
+  CHAR8 Serial[MAX_RSP_SIZE] = "";
   CHAR8 VersionTemp[MAX_VERSION_LEN] = "";
+  CHAR8 SlotSuffixAscii[MAX_SLOT_SUFFIX_SZ] = "";
 
-  ZeroMem (&OptionMenuInfo->Info, sizeof (MENU_OPTION_ITEM_INFO));
+  Slot CurrentSlot;
 
-  /* Update fastboot option title */
-  OptionMenuInfo->Info.MsgInfo = mFastbootOptionTitle;
-  for (i = 0; i < ARRAY_SIZE (mFastbootOptionTitle); i++) {
+  ZeroMem (
+      &OptionMenuInfo->Info,
+      sizeof (MENU_OPTION_ITEM_INFO));
+
+  OptionMenuInfo->Info.MsgInfo =
+      mFastbootOptionTitle;
+
+  for (i = 0;
+       i < ARRAY_SIZE (mFastbootOptionTitle);
+       i++)
     OptionMenuInfo->Info.OptionItems[i] = i;
+
+  OptionMenuInfo->Info.MenuType =
+      DISPLAY_MENU_FASTBOOT;
+
+  OptionMenuInfo->Info.OptionNum =
+      ARRAY_SIZE (mFastbootOptionTitle);
+
+  FillRect (
+      0,
+      0,
+      Width,
+      Height,
+      BGR_BLACK);
+
+  /*
+   * Physical key indicators.
+   *
+   * Left:
+   *   Volume Up
+   *   Volume Down
+   *
+   * Right:
+   *   Power, vertically centered between Volume Up/Down.
+   */
+  /*
+   * Physical button centers are calibrated independently.
+   * Use per-mille values for finer positioning than whole percentages.
+   */
+  VolumeUpY = Height * 245 / 1000;
+  VolumeDownY = Height * 315 / 1000;
+  PowerY = Height * 230 / 1000;
+
+  /*
+   * Keep the icons close to the panel edges.
+   * Coordinates below refer to the top-left corner of each
+   * 80x80 bitmap; subtract 40 from Y to center the bitmap
+   * on the physical button center.
+   */
+  LeftArrowX = Width * 1 / 100;
+  RightArrowX =
+      Width - FASTBOOT_KEY_ICON_WIDTH - (Width * 1 / 100);
+
+  DrawFastbootIcon (
+      gFastbootArrowLeft,
+      FASTBOOT_KEY_ICON_WIDTH,
+      FASTBOOT_KEY_ICON_HEIGHT,
+      LeftArrowX,
+      VolumeUpY - (FASTBOOT_KEY_ICON_HEIGHT / 2));
+
+  DrawFastbootIcon (
+      gFastbootArrowLeft,
+      FASTBOOT_KEY_ICON_WIDTH,
+      FASTBOOT_KEY_ICON_HEIGHT,
+      LeftArrowX,
+      VolumeDownY - (FASTBOOT_KEY_ICON_HEIGHT / 2));
+
+  DrawFastbootIcon (
+      gFastbootArrowRight,
+      FASTBOOT_KEY_ICON_WIDTH,
+      FASTBOOT_KEY_ICON_HEIGHT,
+      RightArrowX,
+      PowerY - (FASTBOOT_KEY_ICON_HEIGHT / 2));
+
+  /*
+   * Physical key labels.
+   *
+   * Volume labels sit to the right of the left-side arrows.
+   * Start sits to the left of the right-side power arrow.
+   */
+  DrawFastbootTextAt (
+      "Volume Up",
+      LeftArrowX + FASTBOOT_KEY_ICON_WIDTH + 12,
+      VolumeUpY - 24,
+      COMMON_FACTOR,
+      BGR_WHITE,
+      NULL);
+
+  DrawFastbootTextAt (
+      "Volume Down",
+      LeftArrowX + FASTBOOT_KEY_ICON_WIDTH + 12,
+      VolumeDownY - 24,
+      COMMON_FACTOR,
+      BGR_WHITE,
+      NULL);
+
+  DrawFastbootTextAt (
+      "Start",
+      RightArrowX - 105,
+      PowerY - 24,
+      COMMON_FACTOR,
+      BGR_WHITE,
+      NULL);
+
+  AsciiSPrint (
+      Product,
+      sizeof (Product),
+      "%a",
+      PRODUCT_NAME);
+
+  BoardSerialNum (
+      Serial,
+      sizeof (Serial));
+
+  GetBootloaderVersion (
+      VersionTemp,
+      sizeof (VersionTemp));
+
+  CurrentSlot = GetCurrentSlotSuffix ();
+
+  UnicodeStrToAsciiStr (
+      CurrentSlot.Suffix,
+      SlotSuffixAscii);
+
+  if (SlotSuffixAscii[0] == '_' &&
+      SlotSuffixAscii[1] != '\0') {
+    SlotSuffixAscii[0] = SlotSuffixAscii[1];
+    SlotSuffixAscii[1] = '\0';
   }
-  OptionItem =
-      OptionMenuInfo->Info.OptionItems[OptionMenuInfo->Info.OptionIndex];
-  Status = UpdateFastbootOptionItem (OptionItem, &Location);
-  if (Status != EFI_SUCCESS)
+
+  /*
+   * Bottom aligned compact layout.
+   */
+  LabelX = Width * 6 / 100;
+  ColonX = Width * 30 / 100;
+  ValueX = Width * 34 / 100;
+
+  Y = Height * 70 / 100;
+  Step = 48;
+
+  Status = DrawFastbootIcon (
+      gFastbootWarningIcon,
+      FASTBOOT_WARNING_ICON_WIDTH,
+      FASTBOOT_WARNING_ICON_HEIGHT,
+      LabelX,
+      Y - 132);
+
+  if (EFI_ERROR (Status))
     return Status;
 
-  /* Update fastboot common message */
-  for (i = 0; i < ARRAY_SIZE (mFastbootCommonMsgInfo); i++) {
-    switch (i) {
-    case 0:
-    case 1:
-      break;
-    case 2:
-      /* Get product name */
-      AsciiStrnCatS (mFastbootCommonMsgInfo[i].Msg,
-        sizeof (mFastbootCommonMsgInfo[i].Msg), PRODUCT_NAME,
-        AsciiStrLen (PRODUCT_NAME));
-      break;
-    case 3:
-      /* Get variant value */
-      BoardHwPlatformName (StrTemp, sizeof (StrTemp));
-      GetRootDeviceType (StrTemp1, sizeof (StrTemp1));
+  Status = DrawFastbootTextAt (
+      "Fastboot Mode",
+      LabelX,
+      Y,
+      BIG_FACTOR,
+      BGR_RED,
+      NULL);
 
-      AsciiStrnCatS (mFastbootCommonMsgInfo[i].Msg,
-                     sizeof (mFastbootCommonMsgInfo[i].Msg), StrTemp,
-                     sizeof (StrTemp));
-      AsciiStrnCatS (mFastbootCommonMsgInfo[i].Msg,
-                     sizeof (mFastbootCommonMsgInfo[i].Msg), " ",
-                     AsciiStrLen (" "));
-      AsciiStrnCatS (mFastbootCommonMsgInfo[i].Msg,
-                     sizeof (mFastbootCommonMsgInfo[i].Msg), StrTemp1,
-                     sizeof (StrTemp1));
-      break;
-    case 4:
-      /* Get bootloader version */
-      GetBootloaderVersion (VersionTemp, sizeof (VersionTemp));
-      AsciiStrnCatS (mFastbootCommonMsgInfo[i].Msg,
-                     sizeof (mFastbootCommonMsgInfo[i].Msg), VersionTemp,
-                     sizeof (VersionTemp));
-      break;
-    case 5:
-      /* Get baseband version */
-      ZeroMem (VersionTemp, sizeof (VersionTemp));
-      GetRadioVersion (VersionTemp, sizeof (VersionTemp));
-      AsciiStrnCatS (mFastbootCommonMsgInfo[i].Msg,
-                     sizeof (mFastbootCommonMsgInfo[i].Msg), VersionTemp,
-                     sizeof (VersionTemp));
-      break;
-    case 6:
-      /* Get serial number */
-      ZeroMem (StrTemp, sizeof (StrTemp));
-      BoardSerialNum (StrTemp, MAX_RSP_SIZE);
-      AsciiStrnCatS (mFastbootCommonMsgInfo[i].Msg,
-                     sizeof (mFastbootCommonMsgInfo[i].Msg), StrTemp,
-                     sizeof (StrTemp));
-      break;
-    case 7:
-      /* Get secure boot value */
-      AsciiStrnCatS (
-          mFastbootCommonMsgInfo[i].Msg, sizeof (mFastbootCommonMsgInfo[i].Msg),
-          IsSecureBootEnabled () ? "yes" : "no",
-          IsSecureBootEnabled () ? AsciiStrLen ("yes") : AsciiStrLen ("no"));
-      break;
-    case 8:
-      /* Get device status */
-      AsciiStrnCatS (
-          mFastbootCommonMsgInfo[i].Msg, sizeof (mFastbootCommonMsgInfo[i].Msg),
-          IsUnlocked () ? "unlocked" : "locked",
-          IsUnlocked () ? AsciiStrLen ("unlocked") : AsciiStrLen ("locked"));
-      break;
-    }
+  if (EFI_ERROR (Status))
+    return Status;
 
-    mFastbootCommonMsgInfo[i].Location = Location;
-    Status = DrawMenu (&mFastbootCommonMsgInfo[i], &Height);
-    if (Status != EFI_SUCCESS)
-      return Status;
-    Location += Height;
-  }
+  Y += 66;
 
-  OptionMenuInfo->Info.MenuType = DISPLAY_MENU_FASTBOOT;
-  OptionMenuInfo->Info.OptionNum = ARRAY_SIZE (mFastbootOptionTitle);
+  /*
+   * Product
+   */
+  DrawFastbootTextAt (
+      "Product",
+      LabelX,
+      Y,
+      COMMON_FACTOR,
+      BGR_WHITE,
+      NULL);
 
-  return Status;
+  DrawFastbootTextAt (
+      ":",
+      ColonX,
+      Y,
+      COMMON_FACTOR,
+      BGR_WHITE,
+      NULL);
+
+  DrawFastbootTextAt (
+      Product,
+      ValueX,
+      Y,
+      COMMON_FACTOR,
+      BGR_WHITE,
+      NULL);
+
+  Y += Step;
+
+  /*
+   * Bootloader version
+   */
+  DrawFastbootTextAt (
+      "Bootloader",
+      LabelX,
+      Y,
+      COMMON_FACTOR,
+      BGR_WHITE,
+      NULL);
+
+  DrawFastbootTextAt (
+      ":",
+      ColonX,
+      Y,
+      COMMON_FACTOR,
+      BGR_WHITE,
+      NULL);
+
+  DrawFastbootTextAt (
+      VersionTemp,
+      ValueX,
+      Y,
+      COMMON_FACTOR,
+      BGR_WHITE,
+      NULL);
+
+  Y += Step;
+
+  /*
+   * Serial
+   */
+  DrawFastbootTextAt (
+      "Serial",
+      LabelX,
+      Y,
+      COMMON_FACTOR,
+      BGR_WHITE,
+      NULL);
+
+  DrawFastbootTextAt (
+      ":",
+      ColonX,
+      Y,
+      COMMON_FACTOR,
+      BGR_WHITE,
+      NULL);
+
+  DrawFastbootTextAt (
+      Serial,
+      ValueX,
+      Y,
+      COMMON_FACTOR,
+      BGR_WHITE,
+      NULL);
+
+  Y += Step;
+
+  /*
+   * Secure Boot
+   */
+  DrawFastbootTextAt (
+      "Secure Boot",
+      LabelX,
+      Y,
+      COMMON_FACTOR,
+      BGR_WHITE,
+      NULL);
+
+  DrawFastbootTextAt (
+      ":",
+      ColonX,
+      Y,
+      COMMON_FACTOR,
+      BGR_WHITE,
+      NULL);
+
+  DrawFastbootTextAt (
+      IsSecureBootEnabled () ? "yes" : "no",
+      ValueX,
+      Y,
+      COMMON_FACTOR,
+      IsSecureBootEnabled () ?
+          BGR_GREEN : BGR_RED,
+      NULL);
+
+  Y += Step;
+
+  /*
+   * Device state
+   */
+  DrawFastbootTextAt (
+      "Device state",
+      LabelX,
+      Y,
+      COMMON_FACTOR,
+      BGR_WHITE,
+      NULL);
+
+  DrawFastbootTextAt (
+      ":",
+      ColonX,
+      Y,
+      COMMON_FACTOR,
+      BGR_WHITE,
+      NULL);
+
+  DrawFastbootTextAt (
+      IsUnlocked () ? "unlocked" : "locked",
+      ValueX,
+      Y,
+      COMMON_FACTOR,
+      IsUnlocked () ?
+          BGR_GREEN : BGR_RED,
+      NULL);
+
+  Y += Step;
+
+  /*
+   * Active slot
+   */
+  DrawFastbootTextAt (
+      "Active slot",
+      LabelX,
+      Y,
+      COMMON_FACTOR,
+      BGR_WHITE,
+      NULL);
+
+  DrawFastbootTextAt (
+      ":",
+      ColonX,
+      Y,
+      COMMON_FACTOR,
+      BGR_WHITE,
+      NULL);
+
+  DrawFastbootTextAt (
+      SlotSuffixAscii,
+      ValueX,
+      Y,
+      COMMON_FACTOR,
+      BGR_GREEN,
+      NULL);
+
+  Y += 62;
+  InstructionY = Y;
+
+  DrawFastbootTextAt (
+      "Press volume keys to select different menu",
+      LabelX,
+      InstructionY,
+      COMMON_FACTOR,
+      BGR_RED,
+      &InstructionHeight);
+
+  /*
+   * Visually center the divider between the bottom edge of the
+   * instruction text and the top edge of the selected text.
+   */
+  DividerY =
+      (InstructionY +
+       InstructionHeight +
+       (Height * 92 / 100)) / 2;
+
+  FillRect (
+      Width * 6 / 100,
+      DividerY,
+      Width * 88 / 100,
+      1,
+      BGR_DARK_GRAY);
+
+  OptionItem =
+      OptionMenuInfo->Info.OptionItems[
+          OptionMenuInfo->Info.OptionIndex];
+
+  Status = UpdateFastbootOptionItem (
+      OptionItem,
+      NULL);
+
+  if (EFI_ERROR (Status))
+    return Status;
+
+  /*
+   * Firmware signature.
+   */
+  DrawFastbootTextAt (
+      "2026 | yanik",
+      Width * 6 / 100,
+      Height * 96 / 100,
+      COMMON_FACTOR,
+      BGR_DARK_GRAY,
+      NULL);
+
+  return EFI_SUCCESS;
 }
 
 /* Draw the fastboot menu and start to detect the key's status */

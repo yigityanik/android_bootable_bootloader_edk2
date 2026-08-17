@@ -30,6 +30,7 @@
 #define _DRAWUI_H_
 
 #include <Uefi.h>
+#include <Protocol/GraphicsOutput.h>
 
 /* 45 characters per line for portrait orientation
  * "720 (W) 1280(H)" : "sysfont2x" -- 720 /(8*2) = 45
@@ -96,6 +97,8 @@ typedef enum {
   BGR_BLUE,
   BGR_CYAN,
   BGR_SILVER,
+  BGR_PINK,
+  BGR_DARK_GRAY,
 } COLOR_TYPE;
 
 typedef enum {
@@ -114,6 +117,7 @@ typedef enum {
   FFBM,
   QMMI,
   NOACTION,
+  EDL,
   OPTION_ACTION_MAX,
 } OPTION_ITEM_ACTION;
 
@@ -133,6 +137,12 @@ typedef struct {
   UINT32 Attribute;
   UINT32 Location;
   UINT32 Action;
+
+  /*
+   * Horizontal pixel position.
+   * Kept at the end so legacy static initializers default to X = 0.
+   */
+  UINT32 X;
 } MENU_MSG_INFO;
 
 typedef struct {
@@ -166,4 +176,31 @@ EFI_STATUS BackUpBootLogoBltBuffer (VOID);
 VOID RestoreBootLogoBitBuffer (VOID);
 VOID FreeBootLogoBltBuffer (VOID);
 VOID DrawMenuInit (VOID);
+
+UINT32 GetScreenWidth (VOID);
+UINT32 GetScreenHeight (VOID);
+
+
+EFI_STATUS
+DrawFastbootIcon (
+    CONST EFI_GRAPHICS_OUTPUT_BLT_PIXEL *Pixels,
+    UINT32 IconWidth,
+    UINT32 IconHeight,
+    UINT32 X,
+    UINT32 Y);
+
+EFI_STATUS
+DrawFastbootBitmapText (CONST CHAR8 *Text,
+                        UINT32 X,
+                        UINT32 Y,
+                        BOOLEAN Bold,
+                        UINT32 FgColor,
+                        UINT32 *TextHeight);
+
+EFI_STATUS
+FillRect (UINT32 X,
+          UINT32 Y,
+          UINT32 Width,
+          UINT32 Height,
+          UINT32 Color);
 #endif

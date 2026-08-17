@@ -31,6 +31,7 @@
 #include <Library/DebugLib.h>
 #include <Library/DrawUI.h>
 #include <Library/Fonts.h>
+#include <Library/FastbootFontData.h>
 #include <Library/MemoryAllocationLib.h>
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/UpdateDeviceTree.h>
@@ -59,6 +60,8 @@ STATIC EFI_GRAPHICS_OUTPUT_BLT_PIXEL mColors[] = {
         [BGR_BLUE] = {0xff, 0x00, 0x00, 0x00},
         [BGR_CYAN] = {0xff, 0xff, 0x00, 0x00},
         [BGR_SILVER] = {0xc0, 0xc0, 0xc0, 0x00},
+  {0xA3, 0x4F, 0xFF, 0x00}, /* Fastboot pink */
+  {0x30, 0x30, 0x30, 0x00}, /* Fastboot dark gray */
 };
 
 STATIC UINT32 GetResolutionWidth (VOID)
@@ -123,6 +126,268 @@ STATIC UINT32 GetResolutionHeight (VOID)
     DEBUG ((EFI_D_ERROR, "Failed to get the height of the screen.\n"));
 
   return Height;
+}
+
+
+UINT32
+GetScreenWidth (VOID)
+{
+  return GetResolutionWidth ();
+}
+
+UINT32
+GetScreenHeight (VOID)
+{
+  return GetResolutionHeight ();
+}
+
+
+
+EFI_STATUS
+DrawFastbootIcon (
+    CONST EFI_GRAPHICS_OUTPUT_BLT_PIXEL *Pixels,
+    UINT32 IconWidth,
+    UINT32 IconHeight,
+    UINT32 X,
+    UINT32 Y)
+{
+  if (Pixels == NULL ||
+      IconWidth == 0 ||
+      IconHeight == 0)
+    return EFI_INVALID_PARAMETER;
+
+  if (GraphicsOutputProtocol == NULL)
+    return EFI_NOT_READY;
+
+  return GraphicsOutputProtocol->Blt (
+      GraphicsOutputProtocol,
+      (EFI_GRAPHICS_OUTPUT_BLT_PIXEL *)Pixels,
+      EfiBltBufferToVideo,
+      0,
+      0,
+      X,
+      Y,
+      IconWidth,
+      IconHeight,
+      IconWidth * sizeof (EFI_GRAPHICS_OUTPUT_BLT_PIXEL));
+}
+
+
+EFI_STATUS
+DrawFastbootBitmapText (CONST CHAR8 *Text,
+                        UINT32 X,
+                        UINT32 Y,
+                        BOOLEAN Bold,
+                        UINT32 FgColor,
+                        UINT32 *TextHeight)
+{
+  EFI_STATUS Status;
+  EFI_GRAPHICS_OUTPUT_BLT_PIXEL *Buffer = NULL;
+  EFI_GRAPHICS_OUTPUT_BLT_PIXEL Pixel;
+  UINT32 ScreenWidth;
+  UINT32 ScreenHeight;
+  UINT32 FontHeight;
+  UINT32 TextWidth = 0;
+  UINT32 DrawWidth;
+  UINT32 CursorX = 0;
+  UINT32 i;
+  UINT32 Row;
+  UINT32 Col;
+  UINT8 Ch;
+
+  if (Text == NULL)
+    return EFI_INVALID_PARAMETER;
+
+  if (FgColor >= ARRAY_SIZE (mColors))
+    return EFI_INVALID_PARAMETER;
+
+  ScreenWidth = GetResolutionWidth ();
+  ScreenHeight = GetResolutionHeight ();
+
+  if (!ScreenWidth || !ScreenHeight)
+    return EFI_UNSUPPORTED;
+
+  if (X >= ScreenWidth || Y >= ScreenHeight)
+    return EFI_INVALID_PARAMETER;
+
+  FontHeight = Bold ?
+      FASTBOOT_BOLD_HEIGHT :
+      FASTBOOT_REGULAR_HEIGHT;
+
+  for (i = 0; Text[i] != '\0'; i++) {
+    Ch = (UINT8)Text[i];
+
+    if (Ch < FASTBOOT_FONT_FIRST ||
+        Ch > FASTBOOT_FONT_LAST)
+      Ch = '?';
+
+    if (Bold) {
+      TextWidth +=
+          gFastbootBoldFont[
+              Ch - FASTBOOT_FONT_FIRST].Advance;
+    } else {
+      TextWidth +=
+          gFastbootRegularFont[
+              Ch - FASTBOOT_FONT_FIRST].Advance;
+    }
+  }
+
+  if (TextWidth == 0)
+    return EFI_SUCCESS;
+
+  DrawWidth = TextWidth;
+
+  if (DrawWidth > ScreenWidth - X)
+    DrawWidth = ScreenWidth - X;
+
+  if (FontHeight > ScreenHeight - Y)
+    FontHeight = ScreenHeight - Y;
+
+  Buffer = AllocateZeroPool (
+      (UINTN)TextWidth *
+      FontHeight *
+      sizeof (EFI_GRAPHICS_OUTPUT_BLT_PIXEL));
+
+  if (Buffer == NULL)
+    return EFI_OUT_OF_RESOURCES;
+
+  Pixel = mColors[FgColor];
+
+  for (i = 0; Text[i] != '\0'; i++) {
+    UINT32 Advance;
+    UINT32 GlyphWidth;
+
+    Ch = (UINT8)Text[i];
+
+    if (Ch < FASTBOOT_FONT_FIRST ||
+        Ch > FASTBOOT_FONT_LAST)
+      Ch = '?';
+
+    if (Bold) {
+      CONST FASTBOOT_BOLD_GLYPH *Glyph =
+          &gFastbootBoldFont[
+              Ch - FASTBOOT_FONT_FIRST];
+
+      Advance = Glyph->Advance;
+      GlyphWidth = Glyph->Width;
+
+      for (Row = 0;
+           Row < FontHeight &&
+           Row < FASTBOOT_BOLD_HEIGHT;
+           Row++) {
+
+        UINT64 Bits = Glyph->Rows[Row];
+
+        for (Col = 0;
+             Col < GlyphWidth;
+             Col++) {
+
+          if ((Bits & (1ULL << Col)) &&
+              ((CursorX + Col) < TextWidth)) {
+
+            Buffer[
+                Row * TextWidth +
+                CursorX + Col] = Pixel;
+          }
+        }
+      }
+
+    } else {
+      CONST FASTBOOT_REGULAR_GLYPH *Glyph =
+          &gFastbootRegularFont[
+              Ch - FASTBOOT_FONT_FIRST];
+
+      Advance = Glyph->Advance;
+      GlyphWidth = Glyph->Width;
+
+      for (Row = 0;
+           Row < FontHeight &&
+           Row < FASTBOOT_REGULAR_HEIGHT;
+           Row++) {
+
+        UINT64 Bits = Glyph->Rows[Row];
+
+        for (Col = 0;
+             Col < GlyphWidth;
+             Col++) {
+
+          if ((Bits & (1ULL << Col)) &&
+              ((CursorX + Col) < TextWidth)) {
+
+            Buffer[
+                Row * TextWidth +
+                CursorX + Col] = Pixel;
+          }
+        }
+      }
+    }
+
+    CursorX += Advance;
+  }
+
+  Status = GraphicsOutputProtocol->Blt (
+      GraphicsOutputProtocol,
+      Buffer,
+      EfiBltBufferToVideo,
+      0,
+      0,
+      X,
+      Y,
+      DrawWidth,
+      FontHeight,
+      TextWidth *
+          sizeof (EFI_GRAPHICS_OUTPUT_BLT_PIXEL));
+
+  FreePool (Buffer);
+
+  if (TextHeight != NULL)
+    *TextHeight = FontHeight;
+
+  return Status;
+}
+
+EFI_STATUS
+FillRect (UINT32 X,
+          UINT32 Y,
+          UINT32 Width,
+          UINT32 Height,
+          UINT32 Color)
+{
+  EFI_GRAPHICS_OUTPUT_BLT_PIXEL Pixel;
+  UINT32 ScreenWidth;
+  UINT32 ScreenHeight;
+
+  ScreenWidth = GetResolutionWidth ();
+  ScreenHeight = GetResolutionHeight ();
+
+  if (!ScreenWidth || !ScreenHeight)
+    return EFI_UNSUPPORTED;
+
+  if (Color >= ARRAY_SIZE (mColors))
+    return EFI_INVALID_PARAMETER;
+
+  if (X >= ScreenWidth || Y >= ScreenHeight)
+    return EFI_INVALID_PARAMETER;
+
+  if (Width > ScreenWidth - X)
+    Width = ScreenWidth - X;
+
+  if (Height > ScreenHeight - Y)
+    Height = ScreenHeight - Y;
+
+  Pixel = mColors[Color];
+
+  return GraphicsOutputProtocol->Blt (
+      GraphicsOutputProtocol,
+      &Pixel,
+      EfiBltVideoFill,
+      0,
+      0,
+      X,
+      Y,
+      Width,
+      Height,
+      0);
 }
 
 EFI_STATUS BackUpBootLogoBltBuffer (VOID)
@@ -498,7 +763,7 @@ DrawMenu (MENU_MSG_INFO *TargetMenu, UINT32 *pHeight)
       gHiiFont,
       /* Set to 0 for Bitmap mode */
       EFI_HII_DIRECT_TO_SCREEN | EFI_HII_OUT_FLAG_WRAP, FontMessage,
-      FontDisplayInfo, &BltBuffer, 0, /* BltX */
+      FontDisplayInfo, &BltBuffer, TargetMenu->X, /* BltX */
       TargetMenu->Location,           /* BltY */
       &RowInfoArray, &RowInfoArraySize, NULL);
   if (Status != EFI_SUCCESS) {
@@ -567,6 +832,7 @@ SetMenuMsgInfo (MENU_MSG_INFO *MenuMsgInfo,
   MenuMsgInfo->Attribute = Attribute;
   MenuMsgInfo->Location = Location;
   MenuMsgInfo->Action = Action;
+  MenuMsgInfo->X = 0;
 }
 
 /**

@@ -127,6 +127,10 @@ UpdateDeviceStatus (OPTION_MENU_INFO *MsgInfo, INTN Reason)
   case POWEROFF:
     ShutdownDevice ();
     break;
+  case EDL:
+    DEBUG ((EFI_D_ERROR, "Fastboot menu: entering Emergency Download mode\n"));
+    RebootDevice (EMERGENCY_DLOAD);
+    break;
   case FASTBOOT:
     RebootDevice (FASTBOOT_MODE);
     break;
