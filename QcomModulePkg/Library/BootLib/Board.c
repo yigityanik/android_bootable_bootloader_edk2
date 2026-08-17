@@ -568,6 +568,99 @@ UfsGetSetBootLun (UINT32 *UfsBootlun, BOOLEAN IsGet)
   return Status;
 }
 
+
+STATIC EFI_STATUS
+ReadOemOwnInfoSerial (CHAR8 *StrSerialNum, UINT32 Len)
+{
+  EFI_STATUS Status;
+  UINT32 BlkIOAttrib = 0;
+  PartiSelectFilter HandleFilter;
+  HandleInfo HandleInfoList[1];
+  UINT32 MaxHandles = ARRAY_SIZE (HandleInfoList);
+  EFI_BLOCK_IO_PROTOCOL *BlkIo = NULL;
+  UINT8 *Buffer = NULL;
+  UINTN SerialLen;
+
+  if ((StrSerialNum == NULL) || (Len == 0))
+    return EFI_INVALID_PARAMETER;
+
+  ZeroMem (&HandleFilter, sizeof (HandleFilter));
+  ZeroMem (HandleInfoList, sizeof (HandleInfoList));
+
+  BlkIOAttrib = BLK_IO_SEL_PARTITIONED_MBR;
+  BlkIOAttrib |= BLK_IO_SEL_PARTITIONED_GPT;
+  BlkIOAttrib |= BLK_IO_SEL_MEDIA_TYPE_NON_REMOVABLE;
+  BlkIOAttrib |= BLK_IO_SEL_MATCH_PARTITION_LABEL;
+
+  HandleFilter.RootDeviceType = NULL;
+  HandleFilter.PartitionLabel = (CHAR16 *)L"oemowninfo";
+  HandleFilter.VolumeName = NULL;
+  HandleFilter.PartitionType = NULL;
+
+  Status = GetBlkIOHandles (
+      BlkIOAttrib,
+      &HandleFilter,
+      HandleInfoList,
+      &MaxHandles);
+
+  if (EFI_ERROR (Status) || MaxHandles == 0) {
+    DEBUG ((EFI_D_ERROR,
+            "oemowninfo: GetBlkIOHandles failed: %r\n",
+            Status));
+    return EFI_NOT_FOUND;
+  }
+
+  BlkIo = HandleInfoList[0].BlkIo;
+  if (BlkIo == NULL)
+    return EFI_NOT_FOUND;
+
+  Buffer = AllocateZeroPool (BlkIo->Media->BlockSize);
+  if (Buffer == NULL)
+    return EFI_OUT_OF_RESOURCES;
+
+  Status = BlkIo->ReadBlocks (
+      BlkIo,
+      BlkIo->Media->MediaId,
+      0,
+      BlkIo->Media->BlockSize,
+      Buffer);
+
+  if (EFI_ERROR (Status)) {
+    DEBUG ((EFI_D_ERROR,
+            "oemowninfo: ReadBlocks failed: %r\n",
+            Status));
+    FreePool (Buffer);
+    return Status;
+  }
+
+  SerialLen = AsciiStrnLenS (
+      (CHAR8 *)Buffer,
+      BlkIo->Media->BlockSize);
+
+  if ((SerialLen == 0) || (SerialLen >= Len)) {
+    DEBUG ((EFI_D_ERROR,
+            "oemowninfo: invalid serial length: %d\n",
+            SerialLen));
+    FreePool (Buffer);
+    return EFI_NOT_FOUND;
+  }
+
+  Status = AsciiStrnCpyS (
+      StrSerialNum,
+      Len,
+      (CHAR8 *)Buffer,
+      SerialLen);
+
+  if (!EFI_ERROR (Status)) {
+    DEBUG ((EFI_D_INFO,
+            "OEM serial read from oemowninfo: %a\n",
+            StrSerialNum));
+  }
+
+  FreePool (Buffer);
+  return Status;
+}
+
 EFI_STATUS
 BoardSerialNum (CHAR8 *StrSerialNum, UINT32 Len)
 {
@@ -578,6 +671,14 @@ BoardSerialNum (CHAR8 *StrSerialNum, UINT32 Len)
   HandleInfo HandleInfoList[HANDLE_MAX_INFO_LIST];
   UINT32 MaxHandles = ARRAY_SIZE (HandleInfoList);
   MemCardType Type = EMMC;
+
+  Status = ReadOemOwnInfoSerial (StrSerialNum, Len);
+  if (!EFI_ERROR (Status))
+    return EFI_SUCCESS;
+
+  DEBUG ((EFI_D_ERROR,
+          "OEM serial unavailable, falling back to storage serial: %r\n",
+          Status));
 
   Type = CheckRootDeviceType ();
   if (Type == UNKNOWN)
