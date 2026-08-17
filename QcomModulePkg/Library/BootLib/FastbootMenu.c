@@ -43,6 +43,11 @@
 #include <Protocol/EFIVerifiedBoot.h>
 #include <Uefi.h>
 
+#ifndef BOOTLOADER_VERSION
+#define BOOTLOADER_VERSION "unknown"
+#endif
+
+
 STATIC OPTION_MENU_INFO gMenuInfo;
 
 STATIC MENU_MSG_INFO mFastbootOptionTitle[] = {
@@ -213,7 +218,6 @@ FastbootMenuShowScreen (OPTION_MENU_INFO *OptionMenuInfo)
 
   CHAR8 Product[MAX_RSP_SIZE] = "";
   CHAR8 Serial[MAX_RSP_SIZE] = "";
-  CHAR8 VersionTemp[MAX_VERSION_LEN] = "";
   CHAR8 SlotSuffixAscii[MAX_SLOT_SUFFIX_SZ] = "";
 
   Slot CurrentSlot;
@@ -332,10 +336,6 @@ FastbootMenuShowScreen (OPTION_MENU_INFO *OptionMenuInfo)
       Serial,
       sizeof (Serial));
 
-  GetBootloaderVersion (
-      VersionTemp,
-      sizeof (VersionTemp));
-
   CurrentSlot = GetCurrentSlotSuffix ();
 
   UnicodeStrToAsciiStr (
@@ -430,7 +430,7 @@ FastbootMenuShowScreen (OPTION_MENU_INFO *OptionMenuInfo)
       NULL);
 
   DrawFastbootTextAt (
-      VersionTemp,
+      BOOTLOADER_VERSION,
       ValueX,
       Y,
       COMMON_FACTOR,
