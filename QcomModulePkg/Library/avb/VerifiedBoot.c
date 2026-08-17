@@ -1435,17 +1435,15 @@ DisplayVerifiedBootScreen (BootInfo *Info)
     }
     break;
   case ORANGE:
+    /*
+     * Skip the unlocked bootloader warning screen.
+     * Verified boot state remains ORANGE; only the visual warning is omitted.
+     */
     if (FfbmStr[0] != '\0' && !TargetBuildVariantUser ()) {
       DEBUG ((EFI_D_VERBOSE, "Device will boot into FFBM mode\n"));
     } else {
-      Status = DisplayVerifiedBootMenu (DISPLAY_MENU_ORANGE);
-      if (Status == EFI_SUCCESS) {
-        WaitForExitKeysDetection ();
-      } else {
-        DEBUG (
-            (EFI_D_INFO, "Device is unlocked, Skipping boot verification\n"));
-        MicroSecondDelay (5000000);
-      }
+      DEBUG ((EFI_D_INFO,
+              "Device is unlocked, bootloader warning skipped\n"));
     }
     break;
   default:
