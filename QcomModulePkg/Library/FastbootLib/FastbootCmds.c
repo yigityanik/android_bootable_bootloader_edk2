@@ -3051,6 +3051,49 @@ CmdOemOffModeCharger (CONST CHAR8 *Arg, VOID *Data, UINT32 Size)
   }
 }
 
+STATIC VOID
+CmdOemUart (CONST CHAR8 *Arg, VOID *Data, UINT32 Size)
+{
+  CONST CHAR8 *Value;
+  BOOLEAN Enabled;
+  EFI_STATUS Status;
+
+  Value = Arg ? AsciiStrStr (Arg, " ") : NULL;
+  if (Value == NULL) {
+    FastbootFail ("Enter fastboot oem uart enable/disable");
+    return;
+  }
+
+  while (*Value == ' ') {
+    Value++;
+  }
+
+  if (!AsciiStrCmp (Value, "enable") || !AsciiStrCmp (Value, "true")) {
+    Enabled = TRUE;
+  } else if (!AsciiStrCmp (Value, "disable") ||
+             !AsciiStrCmp (Value, "false")) {
+    Enabled = FALSE;
+  } else {
+    FastbootFail ("Enter fastboot oem uart enable/disable");
+    return;
+  }
+
+  Status = gRT->SetVariable ((CHAR16 *)L"UartLogEnabled",
+                             &gQcomTokenSpaceGuid,
+                             EFI_VARIABLE_NON_VOLATILE |
+                             EFI_VARIABLE_BOOTSERVICE_ACCESS |
+                             EFI_VARIABLE_RUNTIME_ACCESS,
+                             sizeof (Enabled),
+                             &Enabled);
+  if (EFI_ERROR (Status)) {
+    FastbootFail ("Failed to save UART logging setting");
+    return;
+  }
+
+  FastbootOkay (Enabled ? "UART logging enabled; reboot required" :
+                          "UART logging disabled; reboot required");
+}
+
 STATIC EFI_STATUS
 DisplaySetVariable (CHAR16 *VariableName, VOID *VariableValue, UINTN DataSize)
 {
@@ -3807,6 +3850,7 @@ FastbootCommandSetup (IN VOID *Base, IN UINT64 Size)
       {"oem enable-charger-screen", CmdOemEnableChargerScreen},
       {"oem disable-charger-screen", CmdOemDisableChargerScreen},
       {"oem off-mode-charge", CmdOemOffModeCharger},
+      {"oem uart", CmdOemUart},
       {"oem select-display-panel", CmdOemSelectDisplayPanel},
       {"oem device-info", CmdOemDevinfo},
       {"continue", CmdContinue},

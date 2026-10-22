@@ -51,6 +51,21 @@
 STATIC QCOM_SCM_MODE_SWITCH_PROTOCOL *pQcomScmModeSwitchProtocol = NULL;
 STATIC BOOLEAN BootDevImage;
 
+STATIC BOOLEAN
+IsUartLogEnabled (VOID)
+{
+  EFI_STATUS Status;
+  BOOLEAN Enabled = FALSE;
+  UINTN DataSize = sizeof (Enabled);
+
+  Status = gRT->GetVariable ((CHAR16 *)L"UartLogEnabled",
+                            &gQcomTokenSpaceGuid,
+                            NULL,
+                            &DataSize,
+                            &Enabled);
+  return !EFI_ERROR (Status) && Enabled;
+}
+
 /* To set load addresses, callers should make sure to initialize the
  * BootParamlistPtr before calling this function */
 UINT64 SetandGetLoadAddr (BootParamlist *BootParamlistPtr, AddrType Type)
@@ -859,6 +874,7 @@ BootLinux (BootInfo *Info)
   /*Boot Image header information variables*/
   CHAR8 FfbmStr[FFBM_MODE_BUF_SIZE] = {'\0'};
   BOOLEAN IsModeSwitch = FALSE;
+  BOOLEAN UartLogEnabled = IsUartLogEnabled ();
 
   BootParamlist BootParamlistPtr = {0};
 
@@ -1032,7 +1048,7 @@ BootLinux (BootInfo *Info)
 
   BootStatsSetTimeStamp (BS_KERNEL_ENTRY);
 
-  if (IsVmEnabled ()) {
+  if (IsVmEnabled () && !UartLogEnabled) {
     DisableHypUartUsageForLogging ();
   }
 
