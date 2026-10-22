@@ -189,6 +189,10 @@ DrawFastbootIcon (
     UINT32 X,
     UINT32 Y);
 
+UINT32
+GetFastbootBitmapTextWidth (CONST CHAR8 *Text,
+                            BOOLEAN Bold);
+
 EFI_STATUS
 DrawFastbootBitmapText (CONST CHAR8 *Text,
                         UINT32 X,

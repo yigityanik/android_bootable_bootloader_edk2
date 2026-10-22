@@ -173,6 +173,39 @@ DrawFastbootIcon (
 }
 
 
+UINT32
+GetFastbootBitmapTextWidth (CONST CHAR8 *Text,
+                            BOOLEAN Bold)
+{
+  UINT32 TextWidth = 0;
+  UINT32 i;
+  UINT8 Ch;
+
+  if (Text == NULL)
+    return 0;
+
+  for (i = 0; Text[i] != '\0'; i++) {
+    Ch = (UINT8)Text[i];
+
+    if (Ch < FASTBOOT_FONT_FIRST ||
+        Ch > FASTBOOT_FONT_LAST)
+      Ch = '?';
+
+    if (Bold) {
+      TextWidth +=
+          gFastbootBoldFont[
+              Ch - FASTBOOT_FONT_FIRST].Advance;
+    } else {
+      TextWidth +=
+          gFastbootRegularFont[
+              Ch - FASTBOOT_FONT_FIRST].Advance;
+    }
+  }
+
+  return TextWidth;
+}
+
+
 EFI_STATUS
 DrawFastbootBitmapText (CONST CHAR8 *Text,
                         UINT32 X,

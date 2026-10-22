@@ -51,23 +51,31 @@
 STATIC OPTION_MENU_INFO gMenuInfo;
 
 STATIC MENU_MSG_INFO mFastbootOptionTitle[] = {
-    {{"Resume"},
+    {{"Start"},
      BIG_FACTOR,
-     BGR_GREEN,
+     BGR_WHITE,
      BGR_BLACK,
      OPTION_ITEM,
      0,
      RESTART},
 
-    {{"Power Off"},
+    {{"Restart"},
      BIG_FACTOR,
      BGR_RED,
      BGR_BLACK,
      OPTION_ITEM,
      0,
-     POWEROFF},
+     FASTBOOT},
 
-    {{"Emergency Download"},
+    {{"Recovery"},
+     BIG_FACTOR,
+     BGR_GREEN,
+     BGR_BLACK,
+     OPTION_ITEM,
+     0,
+     RECOVER},
+
+    {{"EDL"},
      BIG_FACTOR,
      BGR_YELLOW,
      BGR_BLACK,
@@ -75,21 +83,13 @@ STATIC MENU_MSG_INFO mFastbootOptionTitle[] = {
      0,
      EDL},
 
-    {{"Recovery Mode"},
-     BIG_FACTOR,
-     BGR_PINK,
-     BGR_BLACK,
-     OPTION_ITEM,
-     0,
-     RECOVER},
-
-    {{"Restart bootloader"},
+    {{"Shutdown"},
      BIG_FACTOR,
      BGR_RED,
      BGR_BLACK,
      OPTION_ITEM,
      0,
-     FASTBOOT},
+     POWEROFF},
 };
 
 
@@ -125,63 +125,59 @@ UpdateFastbootOptionItem (UINT32 OptionItem, UINT32 *pLocation)
   EFI_STATUS Status;
   UINT32 Width = GetScreenWidth ();
   UINT32 Height = GetScreenHeight ();
-  UINT32 LabelX;
-  UINT32 ValueX;
-  UINT32 ArrowX;
-  UINT32 Y;
+  UINT32 RightArrowX;
+  UINT32 ActionRightX;
+  UINT32 ActionX;
+  UINT32 ActionY;
+  UINT32 ClearX;
+  UINT32 TextWidth;
   UINT32 Color;
 
   if (OptionItem >= ARRAY_SIZE (mFastbootOptionTitle))
     return EFI_INVALID_PARAMETER;
 
-  LabelX = Width * 6 / 100;
-  ValueX = Width * 22 / 100;
-  ArrowX = Width * 90 / 100;
-  Y = Height * 92 / 100;
+  RightArrowX =
+      Width - FASTBOOT_KEY_ICON_WIDTH - (Width * 1 / 100);
+
+  ActionY = (Height * 230 / 1000) - 24;
+
+  /*
+   * Right-align every action label against the power arrow.
+   * Keep a constant gap between the text and the arrow.
+   */
+  ActionRightX = RightArrowX - 16;
+
+  TextWidth = GetFastbootBitmapTextWidth (
+      mFastbootOptionTitle[OptionItem].Msg,
+      FALSE);
+
+  ActionX = ActionRightX - TextWidth;
+
   Color = mFastbootOptionTitle[OptionItem].FgColor;
 
   /*
-   * Clear only the selected item area.
+   * Always clear the complete action area so switching from
+   * a long label to a short one cannot leave stale pixels.
    */
+  ClearX = RightArrowX - 220;
+
   FillRect (
-      0,
-      Height * 91 / 100,
-      Width,
-      Height * 4 / 100,
+      ClearX,
+      ActionY - 4,
+      RightArrowX - ClearX,
+      56,
       BGR_BLACK);
 
   Status = DrawFastbootTextAt (
-      "Selected:",
-      LabelX,
-      Y,
-      COMMON_FACTOR,
-      BGR_SILVER,
-      NULL);
-
-  if (EFI_ERROR (Status))
-    return Status;
-
-  Status = DrawFastbootTextAt (
       mFastbootOptionTitle[OptionItem].Msg,
-      ValueX,
-      Y,
-      COMMON_FACTOR,
-      Color,
-      NULL);
-
-  if (EFI_ERROR (Status))
-    return Status;
-
-  Status = DrawFastbootTextAt (
-      ">",
-      ArrowX,
-      Y,
+      ActionX,
+      ActionY,
       COMMON_FACTOR,
       Color,
       NULL);
 
   if (pLocation != NULL)
-    *pLocation = Y;
+    *pLocation = ActionY;
 
   return Status;
 }
@@ -204,8 +200,6 @@ FastbootMenuShowScreen (OPTION_MENU_INFO *OptionMenuInfo)
   UINT32 Y;
   UINT32 Step;
   UINT32 InstructionY;
-  UINT32 InstructionHeight = 0;
-  UINT32 DividerY;
 
   UINT32 VolumeUpY;
   UINT32 VolumeDownY;
@@ -300,7 +294,7 @@ FastbootMenuShowScreen (OPTION_MENU_INFO *OptionMenuInfo)
    * Physical key labels.
    *
    * Volume labels sit to the right of the left-side arrows.
-   * Start sits to the left of the right-side power arrow.
+   * The selected action sits to the left of the right-side power arrow.
    */
   DrawFastbootTextAt (
       "Volume Up",
@@ -314,14 +308,6 @@ FastbootMenuShowScreen (OPTION_MENU_INFO *OptionMenuInfo)
       "Volume Down",
       LeftArrowX + FASTBOOT_KEY_ICON_WIDTH + 12,
       VolumeDownY - 24,
-      COMMON_FACTOR,
-      BGR_WHITE,
-      NULL);
-
-  DrawFastbootTextAt (
-      "Start",
-      RightArrowX - 105,
-      PowerY - 24,
       COMMON_FACTOR,
       BGR_WHITE,
       NULL);
@@ -356,7 +342,7 @@ FastbootMenuShowScreen (OPTION_MENU_INFO *OptionMenuInfo)
   ValueX = Width * 34 / 100;
 
   Y = Height * 70 / 100;
-  Step = 48;
+  Step = 60;
 
   Status = DrawFastbootIcon (
       gFastbootWarningIcon,
@@ -555,7 +541,7 @@ FastbootMenuShowScreen (OPTION_MENU_INFO *OptionMenuInfo)
       BGR_GREEN,
       NULL);
 
-  Y += 62;
+  Y += 76;
   InstructionY = Y;
 
   DrawFastbootTextAt (
@@ -564,23 +550,7 @@ FastbootMenuShowScreen (OPTION_MENU_INFO *OptionMenuInfo)
       InstructionY,
       COMMON_FACTOR,
       BGR_RED,
-      &InstructionHeight);
-
-  /*
-   * Visually center the divider between the bottom edge of the
-   * instruction text and the top edge of the selected text.
-   */
-  DividerY =
-      (InstructionY +
-       InstructionHeight +
-       (Height * 92 / 100)) / 2;
-
-  FillRect (
-      Width * 6 / 100,
-      DividerY,
-      Width * 88 / 100,
-      1,
-      BGR_DARK_GRAY);
+      NULL);
 
   OptionItem =
       OptionMenuInfo->Info.OptionItems[
@@ -592,17 +562,6 @@ FastbootMenuShowScreen (OPTION_MENU_INFO *OptionMenuInfo)
 
   if (EFI_ERROR (Status))
     return Status;
-
-  /*
-   * Firmware signature.
-   */
-  DrawFastbootTextAt (
-      "2026 | yanik",
-      Width * 6 / 100,
-      Height * 96 / 100,
-      COMMON_FACTOR,
-      BGR_DARK_GRAY,
-      NULL);
 
   return EFI_SUCCESS;
 }
