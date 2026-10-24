@@ -70,6 +70,7 @@ BOOLEAN IsUnlocked (VOID);
 BOOLEAN IsUnlockCritical (VOID);
 BOOLEAN IsEnforcing (VOID);
 BOOLEAN IsChargingScreenEnable (VOID);
+BOOLEAN IsOemRelockPermissive (VOID);
 VOID
 GetBootloaderVersion (CHAR8 *BootloaderVersion, UINT32 Len);
 VOID
@@ -80,6 +81,8 @@ EFI_STATUS
 EnableEnforcingMode (BOOLEAN IsEnabled);
 EFI_STATUS
 SetDeviceUnlockValue (UINT32 Type, BOOLEAN State);
+EFI_STATUS
+OemRelockDevice (VOID);
 EFI_STATUS DeviceInfoInit (VOID);
 EFI_STATUS
 ReadRollbackIndex (UINT32 Loc, UINT64 *RollbackIndex);

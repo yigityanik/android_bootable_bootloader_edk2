@@ -1704,12 +1704,13 @@ CmdFlash (IN CONST CHAR8 *arg, IN VOID *data, IN UINT32 sz)
   if ((GetAVBVersion () == AVB_LE) ||
       ((GetAVBVersion () != AVB_LE) &&
       (TargetBuildVariantUser ()))) {
-    if (!IsUnlocked ()) {
+    if (!IsUnlocked () && !IsOemRelockPermissive ()) {
       FastbootFail ("Flashing is not allowed in Lock State");
       return;
     }
 
-    if (!IsUnlockCritical () && IsCriticalPartition (PartitionName)) {
+    if (!IsUnlockCritical () && IsCriticalPartition (PartitionName) &&
+        !IsOemRelockPermissive ()) {
       FastbootFail ("Flashing is not allowed for Critical Partitions\n");
       return;
     }
@@ -2733,6 +2734,17 @@ CmdGetVar (CONST CHAR8 *Arg, VOID *Data, UINT32 Size)
 
   UpdateGetVarVariable ();
 
+  if (!AsciiStrCmp ("relocked", Arg)) {
+    FastbootOkay (IsOemRelockPermissive () ? "yes" : "no");
+    return;
+  }
+
+  if (!AsciiStrCmp ("device-state", Arg)) {
+    FastbootOkay (IsOemRelockPermissive () ? "relocked" :
+                  (IsUnlocked () ? "unlocked" : "locked"));
+    return;
+  }
+
   if (!(AsciiStrCmp ("all", Arg))) {
     CmdGetVarAll ();
     return;
@@ -2797,7 +2809,7 @@ CmdBoot (CONST CHAR8 *Arg, VOID *Data, UINT32 Size)
       return;
     }
   }
-  if (!IsUnlocked ()) {
+  if (!IsUnlocked () && !IsOemRelockPermissive ()) {
     FastbootFail (
           "Fastboot boot command is not available in locked device");
       return;
@@ -3092,6 +3104,31 @@ CmdOemUart (CONST CHAR8 *Arg, VOID *Data, UINT32 Size)
 
   FastbootOkay (Enabled ? "UART logging enabled; reboot required" :
                           "UART logging disabled; reboot required");
+}
+
+STATIC VOID
+CmdOemRelock (CONST CHAR8 *Arg, VOID *Data, UINT32 Size)
+{
+  EFI_STATUS Status;
+
+  (VOID)Arg;
+  (VOID)Data;
+  (VOID)Size;
+
+  if (!IsUnlocked () && !IsOemRelockPermissive ()) {
+    FastbootFail ("Relock mode can only be enabled from an unlocked device");
+    return;
+  }
+
+  Status = OemRelockDevice ();
+  if (EFI_ERROR (Status)) {
+    FastbootFail ("Failed to save relock state");
+    return;
+  }
+
+  FastbootOkay ("Relocked; rebooting");
+  gBS->Stall (500000);
+  gRT->ResetSystem (EfiResetCold, EFI_SUCCESS, 0, NULL);
 }
 
 STATIC EFI_STATUS
@@ -3395,7 +3432,8 @@ CmdOemDevinfo (CONST CHAR8 *arg, VOID *data, UINT32 sz)
   FastbootInfo (DeviceInfo);
   WaitForTransferComplete ();
   AsciiSPrint (DeviceInfo, sizeof (DeviceInfo), "Device unlocked: %a",
-               IsUnlocked () ? "true" : "false");
+               IsOemRelockPermissive () ? "relocked" :
+               (IsUnlocked () ? "true" : "false"));
   FastbootInfo (DeviceInfo);
   WaitForTransferComplete ();
   AsciiSPrint (DeviceInfo, sizeof (DeviceInfo), "Device critical unlocked: %a",
@@ -3851,6 +3889,7 @@ FastbootCommandSetup (IN VOID *Base, IN UINT64 Size)
       {"oem disable-charger-screen", CmdOemDisableChargerScreen},
       {"oem off-mode-charge", CmdOemOffModeCharger},
       {"oem uart", CmdOemUart},
+      {"oem relock", CmdOemRelock},
       {"oem select-display-panel", CmdOemSelectDisplayPanel},
       {"oem device-info", CmdOemDevinfo},
       {"continue", CmdContinue},
@@ -3955,6 +3994,7 @@ FastbootCommandSetup (IN VOID *Base, IN UINT64 Size)
                IsChargingScreenEnable ());
   FastbootPublishVar ("off-mode-charge", ChargeScreenEnable);
   FastbootPublishVar ("unlocked", IsUnlocked () ? "yes" : "no");
+  FastbootPublishVar ("relocked", IsOemRelockPermissive () ? "yes" : "no");
 
   AsciiSPrint (StrSocVersion, sizeof (StrSocVersion), "%x",
                 BoardPlatformChipVersion ());

@@ -27,6 +27,7 @@
 */
 
 #include "VerifiedBoot.h"
+#include "AvbConfig.h"
 #include "BootLinux.h"
 #include "BootImage.h"
 #include "KeymasterClient.h"
@@ -1047,7 +1048,7 @@ LoadImageAndAuthVB2 (BootInfo *Info)
   AvbOps *Ops = NULL;
   CHAR8 PnameAscii[MAX_GPT_NAME_SIZE] = {0};
   CHAR8 *SlotSuffix = NULL;
-  BOOLEAN AllowVerificationError = IsUnlocked ();
+  BOOLEAN AllowVerificationError = !AVB_HASH_VERIFICATION || IsUnlocked ();
   CHAR8 *RequestedPartitionAll[MAX_NUM_REQ_PARTITION] = {NULL};
   CHAR8 **RequestedPartition = NULL;
   UINTN NumRequestedPartition = 0;

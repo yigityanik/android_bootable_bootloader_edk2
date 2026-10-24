@@ -33,9 +33,11 @@
 #include <Library/PartitionTableUpdate.h>
 #include <Library/Recovery.h>
 #include <Library/StackCanary.h>
+#include <Library/UefiRuntimeServicesTableLib.h>
 
 STATIC DeviceInfo DevInfo;
 STATIC BOOLEAN FirstReadDevInfo = TRUE;
+#define OEM_RELOCK_VARIABLE_NAME L"OemRelockEnabled"
 
 BOOLEAN IsUnlocked (VOID)
 {
@@ -55,6 +57,36 @@ BOOLEAN IsEnforcing (VOID)
 BOOLEAN IsChargingScreenEnable (VOID)
 {
   return DevInfo.is_charger_screen_enabled;
+}
+
+BOOLEAN IsOemRelockPermissive (VOID)
+{
+  EFI_STATUS Status;
+  BOOLEAN Enabled = FALSE;
+  UINTN DataSize = sizeof (Enabled);
+
+  Status = gRT->GetVariable ((CHAR16 *)OEM_RELOCK_VARIABLE_NAME,
+                             &gQcomTokenSpaceGuid,
+                             NULL,
+                             &DataSize,
+                             &Enabled);
+  if (EFI_ERROR (Status) || DataSize != sizeof (Enabled)) {
+    return FALSE;
+  }
+
+  return Enabled;
+}
+
+STATIC EFI_STATUS
+SetOemRelockPermissive (BOOLEAN Enabled)
+{
+  return gRT->SetVariable ((CHAR16 *)OEM_RELOCK_VARIABLE_NAME,
+                           &gQcomTokenSpaceGuid,
+                           EFI_VARIABLE_NON_VOLATILE |
+                           EFI_VARIABLE_BOOTSERVICE_ACCESS |
+                           EFI_VARIABLE_RUNTIME_ACCESS,
+                           sizeof (Enabled),
+                           &Enabled);
 }
 
 VOID
@@ -147,6 +179,7 @@ EFI_STATUS
 SetDeviceUnlockValue (UINT32 Type, BOOLEAN State)
 {
   EFI_STATUS Status = EFI_SUCCESS;
+  BOOLEAN WasOemRelockPermissive = IsOemRelockPermissive ();
   struct RecoveryMessage Msg;
   EFI_GUID Ptype = gEfiMiscPartitionGuid;
   MemCardType CardType = UNKNOWN;
@@ -165,12 +198,25 @@ SetDeviceUnlockValue (UINT32 Type, BOOLEAN State)
   if (Status != EFI_SUCCESS)
     return Status;
 
+  if (Type == UNLOCK) {
+    Status = SetOemRelockPermissive (FALSE);
+    if (EFI_ERROR (Status)) {
+      SetUnlockValue (!State);
+      DEBUG ((EFI_D_ERROR, "Unable to clear relock state: %r\n", Status));
+      return Status;
+    }
+  }
+
   Status = ResetDeviceState ();
   if (Status != EFI_SUCCESS) {
     if (Type == UNLOCK)
       SetUnlockValue (!State);
     else if (Type == UNLOCK_CRITICAL)
       SetUnlockCriticalValue (!State);
+
+    if (Type == UNLOCK && WasOemRelockPermissive) {
+      SetOemRelockPermissive (TRUE);
+    }
 
     DEBUG ((EFI_D_ERROR, "Unable to set the Value: %r", Status));
     return Status;
@@ -220,6 +266,43 @@ UpdateDevInfo (CHAR16 *Pname, CHAR8 *ImgVersion)
   if (Status != EFI_SUCCESS) {
     DEBUG ((EFI_D_ERROR, "Unable to Write Device Info: %r\n", Status));
   }
+  return Status;
+}
+
+EFI_STATUS
+OemRelockDevice (VOID)
+{
+  EFI_STATUS Status;
+  BOOLEAN WasUnlocked = DevInfo.is_unlocked;
+  BOOLEAN WasUnlockCritical = DevInfo.is_unlock_critical;
+  BOOLEAN WasOemRelockPermissive = IsOemRelockPermissive ();
+
+  Status = SetOemRelockPermissive (TRUE);
+  if (EFI_ERROR (Status)) {
+    DEBUG ((EFI_D_ERROR, "OemRelock: failed to save relock state: %r\n", Status));
+    return Status;
+  }
+
+  DevInfo.is_unlocked = FALSE;
+  DevInfo.is_unlock_critical = FALSE;
+  Status = ReadWriteDeviceInfo (WRITE_CONFIG, &DevInfo, sizeof (DevInfo));
+  if (EFI_ERROR (Status)) {
+    DEBUG ((EFI_D_ERROR, "OemRelock: failed to update device state: %r\n", Status));
+    goto Rollback;
+  }
+
+  Status = ResetDeviceState ();
+  if (!EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  DEBUG ((EFI_D_ERROR, "OemRelock: failed to reset device state: %r\n", Status));
+
+Rollback:
+  DevInfo.is_unlocked = WasUnlocked;
+  DevInfo.is_unlock_critical = WasUnlockCritical;
+  ReadWriteDeviceInfo (WRITE_CONFIG, &DevInfo, sizeof (DevInfo));
+  SetOemRelockPermissive (WasOemRelockPermissive);
   return Status;
 }
 
