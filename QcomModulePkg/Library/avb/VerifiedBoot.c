@@ -1048,7 +1048,7 @@ LoadImageAndAuthVB2 (BootInfo *Info)
   AvbOps *Ops = NULL;
   CHAR8 PnameAscii[MAX_GPT_NAME_SIZE] = {0};
   CHAR8 *SlotSuffix = NULL;
-  BOOLEAN AllowVerificationError = !AVB_HASH_VERIFICATION || IsUnlocked ();
+  BOOLEAN AllowVerificationError = !AVB_HASH_VERIFICATION || IsUnlocked () || IsOemRelockPermissive ();
   CHAR8 *RequestedPartitionAll[MAX_NUM_REQ_PARTITION] = {NULL};
   CHAR8 **RequestedPartition = NULL;
   UINTN NumRequestedPartition = 0;
@@ -1315,7 +1315,11 @@ LoadImageAndAuthVB2 (BootInfo *Info)
 
   /* Set Rot & Boot State*/
   Data.Color = Info->BootState;
-  Data. IsUnlocked = AllowVerificationError;
+  if (IsOemRelockPermissive ()) {
+    Data.IsUnlocked = FALSE;
+  } else {
+    Data.IsUnlocked = AllowVerificationError;
+  }
   Data.PublicKeyLength = UserData->PublicKeyLen;
   Data.PublicKey = UserData->PublicKey;
 
