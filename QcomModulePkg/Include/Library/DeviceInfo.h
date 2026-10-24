@@ -51,6 +51,9 @@ typedef struct device_info {
   CHAR8 bootloader_version[MAX_VERSION_LEN];
   CHAR8 radio_version[MAX_VERSION_LEN];
   BOOLEAN verity_mode; // TRUE = enforcing, FALSE = logging
+  /* Reuse former structure padding; keep the verified-boot record layout. */
+  BOOLEAN is_oem_relocked;
+  CHAR8 oem_relock_tag;
   UINT32 user_public_key_length;
   CHAR8 user_public_key[MAX_USER_KEY_SIZE];
   UINT64 rollback_index[MAX_VB_PARTITIONS];

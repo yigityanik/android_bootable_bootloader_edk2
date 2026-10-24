@@ -2710,6 +2710,18 @@ STATIC VOID CmdGetVarAll (VOID)
   FASTBOOT_VAR *Var;
   CHAR8 GetVarAll[MAX_RSP_SIZE];
 
+  /* These state values can change while the fastboot session is active. */
+  for (Var = Varlist; Var; Var = Var->next) {
+    if (!AsciiStrCmp (Var->name, "unlocked")) {
+      Var->value = IsUnlocked () ? "yes" : "no";
+    } else if (!AsciiStrCmp (Var->name, "relocked")) {
+      Var->value = IsOemRelockPermissive () ? "yes" : "no";
+    } else if (!AsciiStrCmp (Var->name, "device-state")) {
+      Var->value = IsOemRelockPermissive () ? "relocked" :
+                   (IsUnlocked () ? "unlocked" : "locked");
+    }
+  }
+
   for (Var = Varlist; Var; Var = Var->next) {
     AsciiStrnCpyS (GetVarAll, sizeof (GetVarAll), Var->name, MAX_RSP_SIZE);
     AsciiStrnCatS (GetVarAll, sizeof (GetVarAll), ":", AsciiStrLen (":"));
@@ -2742,6 +2754,11 @@ CmdGetVar (CONST CHAR8 *Arg, VOID *Data, UINT32 Size)
   if (!AsciiStrCmp ("device-state", Arg)) {
     FastbootOkay (IsOemRelockPermissive () ? "relocked" :
                   (IsUnlocked () ? "unlocked" : "locked"));
+    return;
+  }
+
+  if (!AsciiStrCmp ("unlocked", Arg)) {
+    FastbootOkay (IsUnlocked () ? "yes" : "no");
     return;
   }
 
@@ -3995,6 +4012,8 @@ FastbootCommandSetup (IN VOID *Base, IN UINT64 Size)
   FastbootPublishVar ("off-mode-charge", ChargeScreenEnable);
   FastbootPublishVar ("unlocked", IsUnlocked () ? "yes" : "no");
   FastbootPublishVar ("relocked", IsOemRelockPermissive () ? "yes" : "no");
+  FastbootPublishVar ("device-state", IsOemRelockPermissive () ? "relocked" :
+                      (IsUnlocked () ? "unlocked" : "locked"));
 
   AsciiSPrint (StrSocVersion, sizeof (StrSocVersion), "%x",
                 BoardPlatformChipVersion ());

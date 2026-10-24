@@ -504,11 +504,12 @@ FastbootMenuShowScreen (OPTION_MENU_INFO *OptionMenuInfo)
       NULL);
 
   DrawFastbootTextAt (
-      IsUnlocked () ? "unlocked" : "locked",
+      IsOemRelockPermissive () ? "relocked" :
+          (IsUnlocked () ? "unlocked" : "locked"),
       ValueX,
       Y,
       COMMON_FACTOR,
-      IsUnlocked () ?
+      IsOemRelockPermissive () ? BGR_YELLOW : IsUnlocked () ?
           BGR_GREEN : BGR_RED,
       NULL);
 
