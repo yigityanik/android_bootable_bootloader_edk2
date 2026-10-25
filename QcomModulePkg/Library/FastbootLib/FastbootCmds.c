@@ -396,6 +396,12 @@ FreeFetchBuffer (VOID)
   mFetchPayloadQueued = FALSE;
 }
 
+STATIC
+EFI_STATUS
+PartitionGetInfo (IN CHAR16 *PartitionName,
+                  OUT EFI_BLOCK_IO_PROTOCOL **BlockIo,
+                  OUT EFI_HANDLE **Handle);
+
 STATIC VOID
 CmdFetch (IN CONST CHAR8 *Arg, IN VOID *Data, IN UINT32 Size)
 {
