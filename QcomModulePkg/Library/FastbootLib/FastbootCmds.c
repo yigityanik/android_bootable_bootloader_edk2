@@ -1769,6 +1769,88 @@ IsCriticalPartition (CHAR16 *PartitionName)
 }
 
 STATIC BOOLEAN
+CheckVirtualAbCriticalPartition (CHAR16 *PartitionName);
+
+STATIC EFI_STATUS
+FastbootFlashSlotPair (IN CONST CHAR16 *BasePartition,
+                       IN VOID *Image,
+                       IN UINT32 Size)
+{
+  EFI_STATUS Status;
+  EFI_BLOCK_IO_PROTOCOL *BlockIo = NULL;
+  EFI_HANDLE *Handle = NULL;
+  UINT64 PartitionSize;
+  CHAR16 PartitionNames[2][MAX_GPT_NAME_SIZE];
+  CHAR16 SlotSuffix[MAX_SLOT_SUFFIX_SZ];
+  UINTN Index;
+  BOOLEAN IsSparse;
+
+  if (BasePartition == NULL || BasePartition[0] == L'\0' || Image == NULL ||
+      Size == 0) {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  for (Index = 0; Index < ARRAY_SIZE (PartitionNames); Index++) {
+    StrCpyS (PartitionNames[Index], ARRAY_SIZE (PartitionNames[Index]),
+             BasePartition);
+    StrCatS (PartitionNames[Index], ARRAY_SIZE (PartitionNames[Index]),
+             Index == 0 ? L"_a" : L"_b");
+  }
+
+  IsSparse = (Size >= sizeof (sparse_header_t) &&
+              ((sparse_header_t *)Image)->magic == SPARSE_HEADER_MAGIC);
+
+  /* Check both destinations before writing either slot. */
+  for (Index = 0; Index < ARRAY_SIZE (PartitionNames); Index++) {
+    if (IsVirtualAbOtaSupported () &&
+        CheckVirtualAbCriticalPartition (PartitionNames[Index])) {
+      return EFI_ACCESS_DENIED;
+    }
+    if (!IsUnlockCritical () && IsCriticalPartition (PartitionNames[Index]) &&
+        !IsOemRelockPermissive ()) {
+      return EFI_ACCESS_DENIED;
+    }
+
+    Status = PartitionGetInfo (PartitionNames[Index], &BlockIo, &Handle);
+    if (EFI_ERROR (Status) || BlockIo == NULL || BlockIo->Media == NULL ||
+        Handle == NULL) {
+      return EFI_NOT_FOUND;
+    }
+
+    PartitionSize = GetPartitionSize (BlockIo);
+    if (PartitionSize == 0 || (!IsSparse && PartitionSize < Size)) {
+      return EFI_VOLUME_FULL;
+    }
+  }
+
+  for (Index = 0; Index < ARRAY_SIZE (PartitionNames); Index++) {
+    if (IsSparse) {
+      Status = HandleSparseImgFlash (PartitionNames[Index],
+                                     MAX_GPT_NAME_SIZE, Image, Size);
+      if (!EFI_ERROR (Status) && StrCmp (BasePartition, L"boot") == 0) {
+        StrCpyS (SlotSuffix, ARRAY_SIZE (SlotSuffix),
+                 Index == 0 ? L"_a" : L"_b");
+        FastbootUpdateAttr (SlotSuffix);
+      }
+    } else if (Size >= sizeof (UbiHeader_t) &&
+               !AsciiStrnCmp (((UbiHeader_t *)Image)->HdrMagic,
+                              UBI_HEADER_MAGIC, 4)) {
+      Status = HandleUbiImgFlash (PartitionNames[Index],
+                                  MAX_GPT_NAME_SIZE, Image, Size);
+    } else {
+      Status = HandleRawImgFlash (PartitionNames[Index],
+                                  MAX_GPT_NAME_SIZE, Image, Size);
+    }
+
+    if (EFI_ERROR (Status)) {
+      return Status;
+    }
+  }
+
+  return EFI_SUCCESS;
+}
+
+STATIC BOOLEAN
 CheckVirtualAbCriticalPartition (CHAR16 *PartitionName)
 {
   VirtualAbMergeStatus SnapshotMergeStatus;
@@ -1894,6 +1976,8 @@ CmdFlash (IN CONST CHAR8 *arg, IN VOID *data, IN UINT32 sz)
   UINT64 PartitionSize = 0;
   UINT32 Ret;
   VirtualAbMergeStatus SnapshotMergeStatus;
+  UINTN PartitionNameLength;
+  CHAR16 BasePartition[MAX_GPT_NAME_SIZE];
 
   ExchangeFlashAndUsbDataBuf ();
   if (mFlashDataBuffer == NULL) {
@@ -1948,6 +2032,21 @@ CmdFlash (IN CONST CHAR8 *arg, IN VOID *data, IN UINT32 sz)
                     AsciiStrLen (VabSnapshotMergeStatus[NONE_MERGE_STATUS]) + 1,
                     "%a", VabSnapshotMergeStatus[NONE_MERGE_STATUS]);
     }
+  }
+
+  PartitionNameLength = StrLen (PartitionName);
+  if (PartitionNameLength > 3 &&
+      StrnCmp (PartitionName + PartitionNameLength - 3, L"_ab", 3) == 0) {
+    StrnCpyS (BasePartition, ARRAY_SIZE (BasePartition), PartitionName,
+              PartitionNameLength - 3);
+    Status = FastbootFlashSlotPair (BasePartition, mFlashDataBuffer,
+                                    mFlashNumDataBytes);
+    if (EFI_ERROR (Status)) {
+      FastbootFail ("Failed to flash both A/B partitions");
+    } else {
+      FastbootOkay ("");
+    }
+    goto out;
   }
 
   /* Handle virtual partition avb_custom_key */
