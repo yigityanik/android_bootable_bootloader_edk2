@@ -1048,7 +1048,8 @@ LoadImageAndAuthVB2 (BootInfo *Info)
   AvbOps *Ops = NULL;
   CHAR8 PnameAscii[MAX_GPT_NAME_SIZE] = {0};
   CHAR8 *SlotSuffix = NULL;
-  BOOLEAN AllowVerificationError = !AVB_HASH_VERIFICATION || IsUnlocked () || IsOemRelockPermissive ();
+  BOOLEAN IsRelockMode = IsOemRelockPermissive ();
+  BOOLEAN AllowVerificationError = !AVB_HASH_VERIFICATION || IsUnlocked () || IsRelockMode;
   CHAR8 *RequestedPartitionAll[MAX_NUM_REQ_PARTITION] = {NULL};
   CHAR8 **RequestedPartition = NULL;
   UINTN NumRequestedPartition = 0;
@@ -1142,8 +1143,8 @@ LoadImageAndAuthVB2 (BootInfo *Info)
     Result = avb_slot_verify (Ops, (CONST CHAR8 *CONST *)RequestedPartition,
                SlotSuffix, VerifyFlags, VerityFlags, &SlotData);
     if (AllowVerificationError &&
-               ResultShouldContinue (Result)) {
-      DEBUG ((EFI_D_VERBOSE, "State: Unlocked, AvbSlotVerify returned "
+            (ResultShouldContinue (Result) || IsOemRelockPermissive ())) {
+      DEBUG ((EFI_D_VERBOSE, "State: Unlocked or Relocked, AvbSlotVerify returned "
                           "%a, continue boot\n",
               avb_slot_verify_result_to_string (Result)));
     } else if (Result != AVB_SLOT_VERIFY_RESULT_OK) {
@@ -1204,8 +1205,8 @@ LoadImageAndAuthVB2 (BootInfo *Info)
     goto out;
   }
 
-  if (AllowVerificationError && ResultShouldContinue (Result)) {
-    DEBUG ((EFI_D_VERBOSE, "State: Unlocked, AvbSlotVerify returned "
+  if (AllowVerificationError && (ResultShouldContinue (Result) || IsOemRelockPermissive ())) {
+    DEBUG ((EFI_D_VERBOSE, "State: Unlocked or Relocked, AvbSlotVerify returned "
                          "%a, continue boot\n",
             avb_slot_verify_result_to_string (Result)));
   } else if (Result != AVB_SLOT_VERIFY_RESULT_OK) {
@@ -1300,14 +1301,18 @@ LoadImageAndAuthVB2 (BootInfo *Info)
   }
 
   if (AllowVerificationError) {
-    Info->BootState = ORANGE;
-  } else {
-    if (UserData->IsUserKey) {
-      Info->BootState = YELLOW;
+      if (IsRelockMode) {
+        Info->BootState = GREEN;
+      } else {
+        Info->BootState = ORANGE;
+      }
     } else {
-      Info->BootState = GREEN;
+      if (UserData->IsUserKey) {
+        Info->BootState = YELLOW;
+      } else {
+        Info->BootState = GREEN;
+      }
     }
-  }
 
   /* command line */
   GUARD_OUT (AppendVBCommonCmdLine (Info));
@@ -1315,10 +1320,10 @@ LoadImageAndAuthVB2 (BootInfo *Info)
 
   /* Set Rot & Boot State*/
   Data.Color = Info->BootState;
-  if (IsOemRelockPermissive ()) {
+  if (IsRelockMode || !IsUnlocked ()) {
     Data.IsUnlocked = FALSE;
   } else {
-    Data.IsUnlocked = AllowVerificationError;
+    Data.IsUnlocked = TRUE;
   }
   Data.PublicKeyLength = UserData->PublicKeyLen;
   Data.PublicKey = UserData->PublicKey;
