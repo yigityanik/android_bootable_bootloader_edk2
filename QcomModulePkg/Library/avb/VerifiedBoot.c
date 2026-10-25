@@ -575,6 +575,8 @@ STATIC EFI_STATUS
 LoadImageAndAuthVB1 (BootInfo *Info)
 {
   EFI_STATUS Status = EFI_SUCCESS;
+  BOOLEAN FastbootBoot = (Info->Images[0].ImageBuffer != NULL) &&
+                         (Info->Images[0].ImageSize > 0);
   CHAR8 StrPnameAscii[MAX_GPT_NAME_SIZE]; /* partition name starting with
                                              / and no suffix */
   CHAR8 PnameAscii[MAX_GPT_NAME_SIZE];
@@ -587,7 +589,8 @@ LoadImageAndAuthVB1 (BootInfo *Info)
   GUARD (LoadImageNoAuth (Info));
 
   device_info_vb_t DevInfo_vb;
-  DevInfo_vb.is_unlocked = IsUnlocked ();
+  DevInfo_vb.is_unlocked = IsUnlocked () ||
+                           (IsOemRelockPermissive () && FastbootBoot);
   DevInfo_vb.is_unlock_critical = IsUnlockCritical ();
   Status = Info->VbIntf->VBDeviceInit (Info->VbIntf,
                                        (device_info_vb_t *)&DevInfo_vb);
@@ -1581,6 +1584,7 @@ EFI_STATUS
 LoadImageAndAuth (BootInfo *Info)
 {
   EFI_STATUS Status = EFI_SUCCESS;
+  BOOLEAN FastbootBoot;
   BOOLEAN MdtpActive = FALSE;
   QCOM_MDTP_PROTOCOL *MdtpProtocol;
   UINT32 AVBVersion = NO_AVB;
@@ -1591,6 +1595,9 @@ LoadImageAndAuth (BootInfo *Info)
     DEBUG ((EFI_D_ERROR, "Invalid parameter Info\n"));
     return EFI_INVALID_PARAMETER;
   }
+
+  FastbootBoot = (Info->Images[0].ImageBuffer != NULL) &&
+                 (Info->Images[0].ImageSize > 0);
 
   /* Get Partition Name*/
   if (!Info->MultiSlotBoot) {
@@ -1677,7 +1684,9 @@ LoadImageAndAuth (BootInfo *Info)
     Status = MdtpProtocol->MdtpDeactivate (MdtpProtocol, FALSE);
   }
 
-  if (IsUnlocked () && Status != EFI_SUCCESS) {
+  if ((IsUnlocked () ||
+       (IsOemRelockPermissive () && FastbootBoot)) &&
+      Status != EFI_SUCCESS) {
     DEBUG ((EFI_D_ERROR, "LoadImageAndAuth failed %r\n", Status));
     return Status;
   }
