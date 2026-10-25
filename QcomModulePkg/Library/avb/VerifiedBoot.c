@@ -1320,7 +1320,7 @@ LoadImageAndAuthVB2 (BootInfo *Info)
 
   /* Set Rot & Boot State*/
   Data.Color = Info->BootState;
-  if (IsRelockMode || !IsUnlocked ()) {
+  if (IsRelockMode || !IsUnlocked ()) {
     Data.IsUnlocked = FALSE;
   } else {
     Data.IsUnlocked = TRUE;
