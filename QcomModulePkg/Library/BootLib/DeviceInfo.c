@@ -253,8 +253,8 @@ OemRelockDevice (VOID)
 
   DevInfo.is_unlocked = FALSE;
   DevInfo.is_unlock_critical = FALSE;
-  DevInfo.is_oem_relocked = TRUE;
-  DevInfo.oem_relock_tag = OEM_RELOCK_TAG;
+  DevInfo.is_oem_relocked = FALSE;
+  DevInfo.oem_relock_tag = 0;
   Status = ReadWriteDeviceInfo (WRITE_CONFIG, &DevInfo, sizeof (DevInfo));
   if (EFI_ERROR (Status)) {
     DEBUG ((EFI_D_ERROR, "OemRelock: failed to update device state: %r\n", Status));
@@ -262,11 +262,32 @@ OemRelockDevice (VOID)
   }
 
   Status = ResetDeviceState ();
-  if (!EFI_ERROR (Status)) {
-    return Status;
+  if (EFI_ERROR (Status)) {
+    DEBUG ((EFI_D_ERROR, "OemRelock: failed to reset device state: %r\n", Status));
+    goto Rollback;
   }
 
-  DEBUG ((EFI_D_ERROR, "OemRelock: failed to reset device state: %r\n", Status));
+  /* ResetDeviceState may rewrite the secure record; write the relock marker
+   * after it so the marker survives the following boot. */
+  DevInfo.is_oem_relocked = TRUE;
+  DevInfo.oem_relock_tag = OEM_RELOCK_TAG;
+  Status = ReadWriteDeviceInfo (WRITE_CONFIG, &DevInfo, sizeof (DevInfo));
+  if (EFI_ERROR (Status)) {
+    DEBUG ((EFI_D_ERROR, "OemRelock: failed to persist relock marker: %r\n", Status));
+    goto Rollback;
+  }
+
+  Status = ReadWriteDeviceInfo (READ_CONFIG, &DevInfo, sizeof (DevInfo));
+  if (EFI_ERROR (Status) || !IsOemRelockPermissive ()) {
+    DEBUG ((EFI_D_ERROR, "OemRelock: relock marker readback failed: %r\n",
+            EFI_ERROR (Status) ? Status : EFI_DEVICE_ERROR));
+    if (!EFI_ERROR (Status)) {
+      Status = EFI_DEVICE_ERROR;
+    }
+    goto Rollback;
+  }
+
+  return EFI_SUCCESS;
 
 Rollback:
   DevInfo.is_unlocked = WasUnlocked;
