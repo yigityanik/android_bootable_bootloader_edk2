@@ -184,6 +184,12 @@ STATIC EFI_EVENT UsbTimerEvent;
 #endif
 
 STATIC UINT64 MaxDownLoadSize = 0;
+#define FASTBOOT_MAX_FETCH_SIZE (1024 * 1024)
+STATIC CHAR8 MaxFetchSizeStr[MAX_RSP_SIZE];
+STATIC UINT8 *mFetchBuffer = NULL;
+STATIC UINT32 mFetchBytes = 0;
+STATIC UINTN mFetchPages = 0;
+STATIC BOOLEAN mFetchPayloadQueued = FALSE;
 
 STATIC INT32 Lun = NO_LUN;
 STATIC BOOLEAN LunSet;
@@ -337,6 +343,201 @@ VOID
 FastbootOkay (IN CONST CHAR8 *info)
 {
   FastbootAck ("OKAY", info);
+}
+
+STATIC BOOLEAN
+ParseFetchHexValue (IN CONST CHAR8 *String, OUT UINT64 *Value)
+{
+  UINT64 Parsed = 0;
+  UINTN Index = 0;
+  UINT8 Digit;
+
+  if (String == NULL || Value == NULL || String[0] == '\0') {
+    return FALSE;
+  }
+
+  if (String[0] == '0' && (String[1] == 'x' || String[1] == 'X')) {
+    Index = 2;
+  }
+  if (String[Index] == '\0') {
+    return FALSE;
+  }
+
+  for (; String[Index] != '\0'; Index++) {
+    if (String[Index] >= '0' && String[Index] <= '9') {
+      Digit = (UINT8)(String[Index] - '0');
+    } else if (String[Index] >= 'a' && String[Index] <= 'f') {
+      Digit = (UINT8)(String[Index] - 'a' + 10);
+    } else if (String[Index] >= 'A' && String[Index] <= 'F') {
+      Digit = (UINT8)(String[Index] - 'A' + 10);
+    } else {
+      return FALSE;
+    }
+
+    if (Parsed > (MAX_UINT64 - Digit) / 16) {
+      return FALSE;
+    }
+    Parsed = (Parsed * 16) + Digit;
+  }
+
+  *Value = Parsed;
+  return TRUE;
+}
+
+STATIC VOID
+FreeFetchBuffer (VOID)
+{
+  if (mFetchBuffer != NULL) {
+    FreePages (mFetchBuffer, mFetchPages);
+    mFetchBuffer = NULL;
+  }
+  mFetchBytes = 0;
+  mFetchPages = 0;
+  mFetchPayloadQueued = FALSE;
+}
+
+STATIC VOID
+CmdFetch (IN CONST CHAR8 *Arg, IN VOID *Data, IN UINT32 Size)
+{
+  EFI_STATUS Status;
+  EFI_BLOCK_IO_PROTOCOL *BlockIo = NULL;
+  EFI_HANDLE *Handle = NULL;
+  CHAR16 PartitionName[MAX_GPT_NAME_SIZE];
+  CHAR8 PartitionNameAscii[MAX_GPT_NAME_SIZE];
+  CHAR8 *OffsetString;
+  CHAR8 *SizeString;
+  CHAR8 *Separator;
+  UINTN PartitionNameLength;
+  UINT64 Offset;
+  UINT64 FetchSize;
+  UINT64 PartitionSize;
+  UINT32 BlockSize;
+  CHAR8 ResponseSize[9];
+  UINTN Index;
+
+  if (!IsUnlocked () && !IsOemRelockPermissive ()) {
+    FastbootFail ("fetch requires an unlocked device");
+    return;
+  }
+
+  Separator = AsciiStrStr ((CHAR8 *)Arg, ":");
+  if (Separator == NULL) {
+    FastbootFail ("usage: fetch:partition:offset:size");
+    return;
+  }
+
+  PartitionNameLength = (UINTN)(Separator - Arg);
+  if (PartitionNameLength == 0 ||
+      PartitionNameLength >= sizeof (PartitionNameAscii)) {
+    FastbootFail ("invalid partition name");
+    return;
+  }
+  AsciiStrnCpyS (PartitionNameAscii, sizeof (PartitionNameAscii), Arg,
+                 PartitionNameLength);
+  for (Index = 0; Index < PartitionNameLength; Index++) {
+    CHAR8 Ch = PartitionNameAscii[Index];
+    if (!((Ch >= 'a' && Ch <= 'z') || (Ch >= 'A' && Ch <= 'Z') ||
+          (Ch >= '0' && Ch <= '9') || Ch == '_' || Ch == '-')) {
+      FastbootFail ("invalid partition name");
+      return;
+    }
+  }
+  if (AsciiStrCmp (PartitionNameAscii, "boot") &&
+      AsciiStrCmp (PartitionNameAscii, "boot_a") &&
+      AsciiStrCmp (PartitionNameAscii, "boot_b")) {
+    FastbootFail ("only boot partitions can be fetched");
+    return;
+  }
+
+  OffsetString = Separator + 1;
+  Separator = AsciiStrStr (OffsetString, ":");
+  if (Separator == NULL) {
+    FastbootFail ("usage: fetch:partition:offset:size");
+    return;
+  }
+  *Separator = '\0';
+  SizeString = Separator + 1;
+  if (AsciiStrStr (SizeString, ":") != NULL ||
+      !ParseFetchHexValue (OffsetString, &Offset) ||
+      !ParseFetchHexValue (SizeString, &FetchSize)) {
+    FastbootFail ("invalid fetch offset or size");
+    return;
+  }
+
+  if (FetchSize == 0 || FetchSize > FASTBOOT_MAX_FETCH_SIZE) {
+    FastbootFail ("fetch size exceeds max-fetch-size");
+    return;
+  }
+
+  AsciiStrToUnicodeStr (PartitionNameAscii, PartitionName);
+  Status = PartitionGetInfo (PartitionName, &BlockIo, &Handle);
+  if (EFI_ERROR (Status) || BlockIo == NULL || BlockIo->Media == NULL ||
+      Handle == NULL) {
+    FastbootFail ("partition not found");
+    return;
+  }
+
+  PartitionSize = GetPartitionSize (BlockIo);
+  BlockSize = BlockIo->Media->BlockSize;
+  if (PartitionSize == 0 || BlockSize == 0 || Offset > PartitionSize ||
+      FetchSize > PartitionSize - Offset) {
+    FastbootFail ("fetch range is outside the partition");
+    return;
+  }
+  if ((Offset % BlockSize) != 0 || (FetchSize % BlockSize) != 0) {
+    FastbootFail ("fetch range must be block aligned");
+    return;
+  }
+
+  mFetchPages = EFI_SIZE_TO_PAGES ((UINTN)FetchSize);
+  mFetchBuffer = AllocateAlignedPages (
+      mFetchPages, BlockIo->Media->IoAlign > 1 ? BlockIo->Media->IoAlign : 0);
+  if (mFetchBuffer == NULL) {
+    mFetchPages = 0;
+    FastbootFail ("unable to allocate fetch buffer");
+    return;
+  }
+
+  Status = BlockIo->ReadBlocks (BlockIo, BlockIo->Media->MediaId,
+                                Offset / BlockSize, (UINTN)FetchSize,
+                                mFetchBuffer);
+  if (EFI_ERROR (Status)) {
+    FreeFetchBuffer ();
+    FastbootFail ("failed to read partition");
+    return;
+  }
+
+  mFetchBytes = (UINT32)FetchSize;
+  mFetchPayloadQueued = FALSE;
+  mState = ExpectFetchDataState;
+  AsciiSPrint (ResponseSize, sizeof (ResponseSize), "%08x", mFetchBytes);
+  FastbootAck ("DATA", ResponseSize);
+}
+
+EFI_STATUS
+FastbootFetchTransferComplete (VOID)
+{
+  EFI_STATUS Status;
+
+  if (mState != ExpectFetchDataState || mFetchBuffer == NULL ||
+      mFetchBytes == 0) {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  if (!mFetchPayloadQueued) {
+    mFetchPayloadQueued = TRUE;
+    Status = GetFastbootDeviceData ()->UsbDeviceProtocol->Send (
+        ENDPOINT_OUT, mFetchBytes, mFetchBuffer);
+    if (EFI_ERROR (Status)) {
+      mFetchPayloadQueued = FALSE;
+    }
+    return Status;
+  }
+
+  FreeFetchBuffer ();
+  mState = ExpectCmdState;
+  FastbootOkay ("");
+  return EFI_SUCCESS;
 }
 
 VOID PartitionDump (VOID)
@@ -2295,6 +2496,8 @@ FastbootCmdsUnInit (VOID)
 {
   EFI_STATUS Status;
 
+  FreeFetchBuffer ();
+
   if (mDataBuffer) {
     Status = GetFastbootDeviceData ()->UsbDeviceProtocol->FreeTransferBuffer (
         (VOID *)mDataBuffer);
@@ -3920,6 +4123,7 @@ FastbootCommandSetup (IN VOID *Base, IN UINT64 Size)
 #endif
       {"reboot-bootloader", CmdRebootBootloader},
       {"getvar:", CmdGetVar},
+      {"fetch:", CmdFetch},
       {"download:", CmdDownload},
   };
 
@@ -3934,6 +4138,9 @@ FastbootCommandSetup (IN VOID *Base, IN UINT64 Size)
   AsciiSPrint (MaxDownloadSizeStr,
                   sizeof (MaxDownloadSizeStr), "%ld", MaxDownLoadSize);
   FastbootPublishVar ("max-download-size", MaxDownloadSizeStr);
+  AsciiSPrint (MaxFetchSizeStr, sizeof (MaxFetchSizeStr), "%u",
+               FASTBOOT_MAX_FETCH_SIZE);
+  FastbootPublishVar ("max-fetch-size", MaxFetchSizeStr);
 
   if (IsDynamicPartitionSupport ()) {
     FastbootPublishVar ("is-userspace", "no");

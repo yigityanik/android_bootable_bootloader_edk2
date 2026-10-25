@@ -111,6 +111,7 @@ struct GetVarPartitionInfo {
 typedef enum {
   ExpectCmdState,
   ExpectDataState,
+  ExpectFetchDataState,
   FastbootStateMax
 } ANDROID_FASTBOOT_STATE;
 
@@ -150,6 +151,9 @@ VOID
 FastbootFail (CONST CHAR8 *reason);
 VOID
 FastbootInfo (CONST CHAR8 *Info);
+
+EFI_STATUS
+FastbootFetchTransferComplete (VOID);
 
 /* Initializes the Fastboot App */
 EFI_STATUS

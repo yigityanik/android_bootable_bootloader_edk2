@@ -284,7 +284,9 @@ ProcessBulkXfrCompleteTx (IN USB_DEVICE_TRANSFER_OUTCOME *Uto)
   case UsbDeviceTransferStatusCompleteOK:
     DEBUG ((EFI_D_VERBOSE, "UsbDeviceTransferStatusCompleteOK\n"));
     /* Just Queue the next recieve, must be a Command */
-    if (FastbootCurrentState () == ExpectDataState)
+    if (FastbootCurrentState () == ExpectFetchDataState)
+      Status = FastbootFetchTransferComplete ();
+    else if (FastbootCurrentState () == ExpectDataState)
       Status = Fbd.UsbDeviceProtocol->Send (ENDPOINT_IN, GetXfrSize (),
                                             FastbootDloadBuffer ());
     else
